@@ -363,8 +363,8 @@ HTML = """<!DOCTYPE html>
 
 <!-- BUTONLAR -->
 <div class="card">
-  <button class="btn btn-start" id="btnBaslat" onclick="baslat()">▶ Başlat</button>
-  <button class="btn btn-stop" id="btnDurdur" onclick="durdur()" disabled>■ Durdur</button>
+  <button class="btn btn-start" id="btnBaslat">▶ Başlat</button>
+  <button class="btn btn-stop" id="btnDurdur" disabled>■ Durdur</button>
 </div>
 
 <!-- LOG -->
@@ -410,6 +410,9 @@ document.querySelectorAll('.op-tab').forEach(function(btn) {
 document.getElementById('opCustom').addEventListener('input', function() {
   document.getElementById('operasyon').value = this.value;
 });
+
+document.getElementById('btnBaslat').addEventListener('click', function() { baslat(); });
+document.getElementById('btnDurdur').addEventListener('click', function() { durdur(); });
 
 // Kumlama makine çoklu seçimi
 document.querySelectorAll('.makine-btn').forEach(function(btn) {
