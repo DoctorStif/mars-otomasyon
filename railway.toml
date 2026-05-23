@@ -1,6 +1,12 @@
-[build]
-builder = "dockerfile"
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
 
-[deploy]
-startCommand = "python app.py"
-restartPolicyType = "on_failure"
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]
