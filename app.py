@@ -1,10 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import asyncio
 import threading
 import os
 import requests
-import json
 from datetime import datetime
 
 app = Flask(__name__)
@@ -25,110 +23,158 @@ def log(mesaj, tip="info"):
     print(f"[{zaman}] {mesaj}")
 
 def api_session_al(kullanici, sifre):
-    """Login yap, session cookie döndür"""
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+    })
+
+    # 1. Login sayfasini ac, CSRF token al
+    r = session.get("http://mars.egebt.com/login")
+    log(f"  Login sayfasi: {r.status_code}")
+
+    # XSRF-TOKEN cookie'den al
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    laravel_session = session.cookies.get("laravel_session", "")
+    log(f"  XSRF: {xsrf[:30] if xsrf else 'YOK'}")
+    log(f"  Session: {laravel_session[:20] if laravel_session else 'YOK'}")
+
+    # HTML'den _token bul
+    csrf_token = ""
+    if "_token" in r.text:
+        import re
+        m = re.search(r'name="_token"\s+value="([^"]+)"', r.text)
+        if m:
+            csrf_token = m.group(1)
+            log(f"  _token: {csrf_token[:20]}")
+
+    # 2. Form ile login
+    session.headers.update({
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": "http://mars.egebt.com/login",
+        "X-XSRF-TOKEN": requests.utils.unquote(xsrf) if xsrf else ""
+    })
+
+    login_data = {
+        "_token": csrf_token,
+        "username": kullanici,
+        "password": sifre,
+    }
+
+    r2 = session.post("http://mars.egebt.com/login", data=login_data, allow_redirects=True)
+    log(f"  Login POST: {r2.status_code}, URL: {r2.url}")
+    log(f"  Login redirect: {'login' not in r2.url}")
+
+    if "login" in r2.url:
+        # JSON ile dene
+        session.headers.update({
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+        })
+        xsrf = session.cookies.get("XSRF-TOKEN", "")
+        if xsrf:
+            session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
+
+        r3 = session.post("http://mars.egebt.com/login", json={
+            "username": kullanici,
+            "password": sifre,
+        })
+        log(f"  JSON Login: {r3.status_code}, {r3.text[:100]}")
+
+    # Son XSRF token'i header'a ekle
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    if xsrf:
+        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
+
+    session.headers.update({
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json",
         "Referer": "http://mars.egebt.com/",
-        "Origin": "http://mars.egebt.com"
+        "X-Requested-With": "XMLHttpRequest"
     })
-
-    # Önce XSRF token al
-    r = session.get("http://mars.egebt.com/login")
-    xsrf = session.cookies.get("XSRF-TOKEN", "")
-    if xsrf:
-        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
-
-    # Login
-    r = session.post("http://mars.egebt.com/api/login", json={
-        "username": kullanici,
-        "password": sifre
-    })
-
-    if r.status_code != 200:
-        # Alternatif login endpoint
-        r = session.post("http://mars.egebt.com/login", data={
-            "username": kullanici,
-            "password": sifre,
-            "_token": xsrf
-        })
-
-    log(f"  Login status: {r.status_code}")
-
-    # XSRF token güncelle
-    xsrf = session.cookies.get("XSRF-TOKEN", "")
-    if xsrf:
-        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
 
     return session
 
 def uretim_bilgisi_al(session, isemri_no):
-    """getUretim API'si ile iş emri detaylarını al"""
-    # XSRF token güncelle
     xsrf = session.cookies.get("XSRF-TOKEN", "")
     if xsrf:
         session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
 
-    r = session.post("http://mars.egebt.com/api/getUretim", json={
-        "isemri_no": isemri_no
-    })
-    log(f"  getUretim status: {r.status_code}")
+    r = session.post("http://mars.egebt.com/api/getUretim", json={"isemri_no": isemri_no})
+    log(f"  getUretim: {r.status_code}")
     if r.status_code == 200:
-        return r.json()
+        try:
+            data = r.json()
+            log(f"  Veri: {str(data)[:200]}")
+            return data
+        except:
+            log(f"  JSON parse hatasi: {r.text[:100]}", "hata")
+    else:
+        log(f"  Hata: {r.text[:100]}", "hata")
     return None
 
 def operasyon_guncelle(session, payload):
-    """updateOperationStatus API'si ile işlemi kaydet"""
     xsrf = session.cookies.get("XSRF-TOKEN", "")
     if xsrf:
         session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
 
     r = session.post("http://mars.egebt.com/api/updateOperationStatus", json=payload)
-    log(f"  updateOperationStatus status: {r.status_code}")
-    try:
-        log(f"  Yanit: {r.text[:200]}")
-    except:
-        pass
+    log(f"  updateStatus: {r.status_code}, {r.text[:100]}")
     return r.status_code == 200
 
 def is_emri_isle(session, isemri_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {isemri_no} | Op: {operasyon} | Makine: {makine_no}")
 
-    # İş emri bilgilerini al
     data = uretim_bilgisi_al(session, isemri_no)
     if not data:
-        log(f"  Is emri bilgisi alinamadi!", "hata")
         return False
 
-    log(f"  Veri alindi: {json.dumps(data)[:300]}")
+    # Veri yapısını anla
+    import json
+    log(f"  Ham veri: {json.dumps(data)[:500]}")
 
-    # Operasyonu bul
-    operasyonlar = data.get("operasyonlar", data.get("operations", data.get("data", [])))
+    # Operasyon listesini bul
+    operasyonlar = []
     if isinstance(data, list):
         operasyonlar = data
+    elif isinstance(data, dict):
+        for key in ["operasyonlar", "operations", "data", "items", "rows"]:
+            if key in data and isinstance(data[key], list):
+                operasyonlar = data[key]
+                break
+        if not operasyonlar:
+            # Tek operasyon objesi olabilir
+            operasyonlar = [data]
 
-    hedef_op = None
+    log(f"  {len(operasyonlar)} operasyon bulundu")
+
     op_norm = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+    hedef_op = None
 
     for op in operasyonlar:
-        op_adi = str(op.get("operasyon_adi", op.get("operation_name", op.get("name", "")))).lower()
-        op_adi_norm = op_adi.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-        if op_norm in op_adi_norm:
-            hedef_op = op
+        if not isinstance(op, dict):
+            continue
+        for key in ["operasyon_adi", "operation_name", "name", "adi", "title"]:
+            val = str(op.get(key, "")).lower()
+            val_norm = val.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+            if op_norm in val_norm:
+                hedef_op = op
+                break
+        if hedef_op:
             break
 
-    if not hedef_op and operasyonlar:
-        log(f"  '{operasyon}' bulunamadi, tum operasyonlar: {[str(op) for op in operasyonlar]}", "uyari")
+    if not hedef_op:
+        if operasyonlar:
+            log(f"  '{operasyon}' bulunamadi. Anahtarlar: {list(operasyonlar[0].keys()) if operasyonlar else []}", "uyari")
         return False
 
-    op_id = hedef_op.get("id") if hedef_op else data.get("id")
-    quality_entries = hedef_op.get("quality_entries", []) if hedef_op else data.get("quality_entries", [])
+    op_id = hedef_op.get("id")
+    quality_entries = hedef_op.get("quality_entries", [])
 
-    # Quality entries'leri OK yap
     for qe in quality_entries:
-        if qe.get("control_type") == "oknok":
+        if isinstance(qe, dict) and qe.get("control_type") == "oknok":
             qe["entered_value"] = "OK"
             qe["result_status"] = "OK"
 
@@ -148,22 +194,19 @@ def is_emri_isle(session, isemri_no, miktar, recete_no, makine_no, operasyon):
         "quality_entries": quality_entries
     }
 
-    log(f"  Payload: {json.dumps(payload)[:300]}")
     sonuc = operasyon_guncelle(session, payload)
     if sonuc:
-        log(f"  Tamamlandi: {isemri_no} - Makine {makine_sayi}", "basari")
-    else:
-        log(f"  Islem basarisiz!", "hata")
+        log(f"  Tamamlandi!", "basari")
     return sonuc
 
 def otomasyon_dongu(config):
     durum["calisıyor"] = True
     durum["tur"] = 0
     log("Otomasyon basladi", "basari")
+    import time
 
     try:
         session = api_session_al(config["kullanici"], config["sifre"])
-        log("Session olusturuldu", "basari")
 
         while durum["calisıyor"]:
             durum["tur"] += 1
@@ -186,7 +229,7 @@ def otomasyon_dongu(config):
                     toplam += 1
                     try:
                         if is_emri_isle(session, isemri_no, config["miktar"],
-                                        config.get("recete", ""), makine, operasyon):
+                                        config.get("recete",""), makine, operasyon):
                             basarili += 1
                     except Exception as e:
                         log(f"Hata ({isemri_no}/{makine}): {e}", "hata")
@@ -197,19 +240,15 @@ def otomasyon_dongu(config):
             for _ in range(config["tekrar_dk"] * 60):
                 if not durum["calisıyor"]:
                     break
-                import time
                 time.sleep(1)
 
     except Exception as e:
-        log(f"Kritik hata: {e}", "hata")
         import traceback
+        log(f"Kritik hata: {e}", "hata")
         log(traceback.format_exc(), "hata")
     finally:
         durum["calisıyor"] = False
         log("Otomasyon durduruldu.")
-
-def thread_baslat(config):
-    otomasyon_dongu(config)
 
 @app.route('/')
 def index():
@@ -219,7 +258,7 @@ def index():
 def baslat():
     if durum["calisıyor"]:
         return jsonify({"ok": False, "mesaj": "Zaten calisiyor!"})
-    t = threading.Thread(target=thread_baslat, args=(request.json,), daemon=True)
+    t = threading.Thread(target=otomasyon_dongu, args=(request.json,), daemon=True)
     t.start()
     return jsonify({"ok": True})
 
