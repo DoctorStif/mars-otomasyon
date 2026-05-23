@@ -42,99 +42,145 @@ async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     if "login" in page.url:
         raise Exception("Oturum sona erdi, yeniden baslatin.")
 
-    # Vue render icin polling bekle - max 30 saniye
-    tum_satirlar = []
+    # Vue render icin bekle, JS ile satir sayisini kontrol et
+    satir_sayisi = 0
     for i in range(30):
         await page.wait_for_timeout(1000)
-        tum_satirlar = await page.query_selector_all("tbody tr")
-        if len(tum_satirlar) > 0:
-            log(f"  Tablo {i+1}. saniyede yuklendi, {len(tum_satirlar)} satir")
+        satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
+        if satir_sayisi > 0:
+            log(f"  {i+1}. saniyede {satir_sayisi} satir bulundu")
             break
-    
-    if len(tum_satirlar) == 0:
+
+    if satir_sayisi == 0:
         log("  Tablo yuklenemedi!", "hata")
         return False
 
-    basla_btn = await page.query_selector(".btn-primary:has-text('Basla'), .btn:has-text('Basla')")
-    if basla_btn:
-        await basla_btn.click()
-        await page.wait_for_timeout(2000)
-        tum_satirlar = await page.query_selector_all("table tbody tr")
-
-    # Tablodaki her satiri gez: buton 1. td'de, operasyon adi 2. td'de
-    tum_satirlar = await page.query_selector_all("table tbody tr")
-    hedef_btn = None
+    # Operasyonu JS ile bul ve tikla
     op_norm = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-    log(f"  Toplam {len(tum_satirlar)} satir bulundu")
-    for satir in tum_satirlar:
-        op_td = await satir.query_selector("td:nth-child(2)")
-        if not op_td:
-            continue
-        op_text = (await op_td.inner_text()).lower()
-        op_text_norm = op_text.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-        log(f"  Satir: {op_text.strip()}")
-        if op_norm in op_text_norm:
-            btn = await satir.query_selector("td:first-child button")
-            if btn:
-                hedef_btn = btn
-                log(f"  Buton bulundu: {op_text.strip()}", "basari")
-                break
+    
+    buton_tiklandi = await page.evaluate(f"""
+        () => {{
+            const opAra = "{op_norm}";
+            const satirlar = document.querySelectorAll('tbody tr');
+            for (let satir of satirlar) {{
+                const tdler = satir.querySelectorAll('td');
+                if (tdler.length < 2) continue;
+                const opText = tdler[1].textContent.toLowerCase()
+                    .replace(/[ğ]/g,'g').replace(/[ü]/g,'u').replace(/[ş]/g,'s')
+                    .replace(/[ı]/g,'i').replace(/[ö]/g,'o').replace(/[ç]/g,'c');
+                if (opText.includes(opAra)) {{
+                    const btn = tdler[0].querySelector('button');
+                    if (btn && !btn.disabled) {{
+                        btn.click();
+                        return true;
+                    }}
+                }}
+            }}
+            return false;
+        }}
+    """)
 
-    if not hedef_btn:
-        log(f"'{operasyon}' icin buton bulunamadi!", "uyari")
+    if not buton_tiklandi:
+        log(f"  '{operasyon}' butonu bulunamadi veya disabled!", "uyari")
         return False
 
-    await hedef_btn.click()
-    # production-dialog'un acilmasini bekle
-    await page.wait_for_selector(".production-dialog__panel", timeout=10000)
-    log("  Modal acildi")
+    log(f"  Buton tiklandi, modal bekleniyor...")
+    await page.wait_for_timeout(2000)
 
-    # Onayli Miktar - production-dialog__metric--ok icindeki input
+    # Modal acildi mi JS ile kontrol et
+    modal_var = await page.evaluate("!!document.querySelector('.production-dialog__panel')")
+    if not modal_var:
+        log("  Modal acilmadi!", "uyari")
+        return False
+
+    log("  Modal acildi, veriler giriliyor...")
+
+    # Onayli Miktar
+    await page.evaluate(f"""
+        () => {{
+            const input = document.querySelector('.production-dialog__metric--ok input');
+            if (input) {{
+                input.value = '';
+                input.dispatchEvent(new Event('input', {{bubbles: true}}));
+            }}
+        }}
+    """)
     miktar_input = await page.query_selector(".production-dialog__metric--ok input")
     if miktar_input:
+        await miktar_input.click()
         await miktar_input.triple_click()
-        await miktar_input.fill(str(miktar))
+        await miktar_input.type(str(miktar))
         log(f"  Miktar girildi: {miktar}")
 
-    # Kalite kontrolleri: OK/NOK select'lerini OK yap
-    kalite_selectler = await page.query_selector_all(".production-dialog__quality-item select.form-select")
-    for sel in kalite_selectler:
-        try:
-            await sel.select_option(value="OK")
-        except:
-            pass
+    # Kalite kontrolleri - tum OK/NOK selectleri OK yap
+    await page.evaluate("""
+        () => {
+            document.querySelectorAll('.production-dialog__quality-item select').forEach(sel => {
+                sel.value = 'OK';
+                sel.dispatchEvent(new Event('change', {bubbles: true}));
+            });
+        }
+    """)
 
-    # Recete No - production-dialog__form-grid icindeki ilk select
+    # Recete No
     if recete_no:
         try:
-            sel = await page.query_selector(".production-dialog__form-grid select:nth-of-type(1)")
-            if sel:
-                await sel.select_option(value=recete_no)
-                log(f"  Recete secildi: {recete_no}")
+            await page.evaluate(f"""
+                () => {{
+                    const sels = document.querySelectorAll('.production-dialog__form-grid select');
+                    if (sels[0]) {{
+                        sels[0].value = '{recete_no}';
+                        sels[0].dispatchEvent(new Event('change', {{bubbles: true}}));
+                    }}
+                }}
+            """)
+            log(f"  Recete girildi: {recete_no}")
         except Exception as e:
-            log(f"  Recete secilemedi: {e}", "uyari")
+            log(f"  Recete hatasi: {e}", "uyari")
 
-    # Makine No - production-dialog__form-grid icindeki ikinci select (deger 1-5)
+    # Makine No - "Kumlama-1" -> "1"
     if makine_no:
         try:
-            # makine_no "Kumlama-1" gibi geliyor, sayiyi al
             makine_sayi = makine_no.split("-")[-1].strip()
-            sel = await page.query_selector(".production-dialog__form-grid select:nth-of-type(2)")
-            if sel:
-                await sel.select_option(value=makine_sayi)
-                log(f"  Makine secildi: {makine_sayi}")
+            await page.evaluate(f"""
+                () => {{
+                    const sels = document.querySelectorAll('.production-dialog__form-grid select');
+                    if (sels[1]) {{
+                        sels[1].value = '{makine_sayi}';
+                        sels[1].dispatchEvent(new Event('change', {{bubbles: true}}));
+                    }}
+                }}
+            """)
+            log(f"  Makine girildi: {makine_sayi}")
         except Exception as e:
-            log(f"  Makine secilemedi: {e}", "uyari")
+            log(f"  Makine hatasi: {e}", "uyari")
 
     await page.wait_for_timeout(500)
-    sonraki = await page.query_selector(".production-dialog__footer .btn-primary")
-    if sonraki:
-        await sonraki.click()
+
+    # Sonraki Islem butonu
+    sonraki_tiklandi = await page.evaluate("""
+        () => {
+            const footer = document.querySelector('.production-dialog__footer');
+            if (!footer) return false;
+            const btns = footer.querySelectorAll('button');
+            for (let btn of btns) {
+                if (btn.textContent.includes('Sonraki')) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        }
+    """)
+
+    if sonraki_tiklandi:
         await page.wait_for_timeout(2000)
         log(f"  Tamamlandi: {is_no} - {makine_no}", "basari")
         return True
-    log("  Sonraki Islem butonu yok!", "uyari")
-    return False
+    else:
+        log("  Sonraki Islem butonu yok!", "uyari")
+        return False
+
 
 async def otomasyon_dongu(config):
     durum["calisıyor"] = True
