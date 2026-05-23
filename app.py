@@ -37,9 +37,10 @@ async def login(page, kullanici, sifre):
 
 async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
-    await page.goto(f"http://mars.egebt.com/uretim?I={is_no}")
-    # Vue.js sayfasinin tamamen yuklenmesini bekle
-    await page.wait_for_selector("table tbody tr", timeout=15000)
+    await page.goto(f"http://mars.egebt.com/uretim?I={is_no}", wait_until="domcontentloaded")
+    # Vue render icin bekle
+    await page.wait_for_timeout(3000)
+    await page.wait_for_selector("table tbody tr", timeout=20000)
 
     basla_btn = await page.query_selector(".btn-primary:has-text('Basla'), .btn:has-text('Basla')")
     if basla_btn:
