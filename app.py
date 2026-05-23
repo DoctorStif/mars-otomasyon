@@ -45,24 +45,54 @@ async def login(page, kullanici, sifre):
 
 async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
-    # SPA navigation - page.goto yerine window.location kullan
-    await page.evaluate(f"window.location.href = '/uretim?I={is_no}'")
+    
+    # Once ana sayfaya git, sonra Vue Router ile navigate et
+    current_url = page.url
+    if "uretim" not in current_url:
+        await page.goto("http://mars.egebt.com/", wait_until="domcontentloaded")
+        await page.wait_for_timeout(2000)
+
+    # Vue Router ile navigate et
+    navigated = await page.evaluate(f"""async () => {{
+        try {{
+            const router = window.__vue_router__ || (window.app && window.app.$router) || 
+                           (document.querySelector('#app') && document.querySelector('#app').__vue__ && document.querySelector('#app').__vue__.$router);
+            if (router) {{
+                await router.push('/uretim?I={is_no}');
+                return 'router';
+            }}
+        }} catch(e) {{}}
+        window.location.href = '/uretim?I={is_no}';
+        return 'location';
+    }}""")
+    log(f"  Navigation: {navigated}")
     await page.wait_for_load_state("domcontentloaded")
-    await page.wait_for_timeout(3000)
+    await page.wait_for_timeout(4000)
 
     if "login" in page.url:
         raise Exception("Oturum sona erdi!")
 
     log(f"  URL: {page.url}")
-    satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
-    log(f"  Satir sayisi: {satir_sayisi}")
+    
+    # Sayfanin HTML'ini logla - ne var ne yok gorelim
+    html_info = await page.evaluate("""() => ({
+        bodyLen: document.body.innerHTML.length,
+        hasApp: !!document.querySelector('#app'),
+        appContent: document.querySelector('#app') ? document.querySelector('#app').innerHTML.substring(0, 200) : 'yok',
+        trCount: document.querySelectorAll('tbody tr').length
+    })""")
+    log(f"  body uzunlugu: {html_info['bodyLen']}")
+    log(f"  #app var mi: {html_info['hasApp']}")
+    log(f"  #app icerik: {html_info['appContent']}")
+    log(f"  tr sayisi: {html_info['trCount']}")
 
+    satir_sayisi = html_info['trCount']
     if satir_sayisi == 0:
         for i in range(15):
             await page.wait_for_timeout(1000)
             satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
             if satir_sayisi > 0:
-                log(f"  {i+1}. saniyede {satir_sayisi} satir bulundu")
+                log(f"  {i+1}. saniyede {satir_sayisi} satir")
                 break
 
     if satir_sayisi == 0:
