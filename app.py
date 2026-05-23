@@ -38,15 +38,32 @@ async def login(page, kullanici, sifre):
 async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
     await page.goto(f"http://mars.egebt.com/uretim?I={is_no}", wait_until="domcontentloaded")
-    # Vue render icin bekle
-    await page.wait_for_timeout(3000)
-    await page.wait_for_selector("table tbody tr", timeout=20000)
+    await page.wait_for_timeout(4000)
+
+    # Login sayfasina dustuyse tekrar giris yap
+    if "login" in page.url:
+        log("Oturum sona ermis, tekrar giris yapiliyor...", "uyari")
+        raise Exception("Oturum sona erdi, yeniden baslatin.")
+
+    # Mevcut URL ve sayfa icerigini logla
+    log(f"  Sayfa yuklendi: {page.url}")
+    html_snippet = await page.evaluate("document.querySelector('table') ? 'tablo VAR' : 'tablo YOK'")
+    log(f"  {html_snippet}")
+
+    tum_satirlar = await page.query_selector_all("table tbody tr")
+    log(f"  Satirlar: {len(tum_satirlar)}")
+
+    if len(tum_satirlar) == 0:
+        # Daha fazla bekle
+        await page.wait_for_timeout(5000)
+        tum_satirlar = await page.query_selector_all("table tbody tr")
+        log(f"  Bekleme sonrasi satirlar: {len(tum_satirlar)}")
 
     basla_btn = await page.query_selector(".btn-primary:has-text('Basla'), .btn:has-text('Basla')")
     if basla_btn:
         await basla_btn.click()
-        await page.wait_for_timeout(1500)
-        await page.wait_for_selector("table tbody tr", timeout=10000)
+        await page.wait_for_timeout(2000)
+        tum_satirlar = await page.query_selector_all("table tbody tr")
 
     # Tablodaki her satiri gez: buton 1. td'de, operasyon adi 2. td'de
     tum_satirlar = await page.query_selector_all("table tbody tr")
