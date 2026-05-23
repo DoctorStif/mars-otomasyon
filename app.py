@@ -50,14 +50,16 @@ async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     hedef_btn = None
     for satir in satirlar:
         satir_text = (await satir.inner_text()).lower()
-        if operasyon.lower() in satir_text:
-            btn = await satir.query_selector("button:has-text('Uretim'), button:has-text('Uretimde'), .btn-success")
+        op_lower = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+        satir_norm = satir_text.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+        if op_lower in satir_norm:
+            btn = await satir.query_selector("button:has-text('Üretim'), button:has-text('Üretimde'), .btn-success, .btn-info")
             if btn:
                 hedef_btn = btn
                 break
 
     if not hedef_btn:
-        hedef_btn = await page.query_selector("button:has-text('Uretim'), .btn-success")
+        hedef_btn = await page.query_selector("button:has-text('Uretim'), button:has-text('Üretim'), button:has-text('Üretimde'), .btn-success, .btn-info")
 
     if not hedef_btn:
         log(f"Uretim butonu bulunamadi: {is_no}", "uyari")
