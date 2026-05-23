@@ -46,20 +46,20 @@ async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
         await page.wait_for_timeout(1500)
         await page.wait_for_load_state("networkidle")
 
-    satirlar = await page.query_selector_all("tr")
+    # Tüm .btn-info butonlarını bul, parent div'inden operasyon adını kontrol et
+    tum_butonlar = await page.query_selector_all(".btn-info")
     hedef_btn = None
-    for satir in satirlar:
-        satir_text = (await satir.inner_text()).lower()
-        op_lower = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-        satir_norm = satir_text.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-        if op_lower in satir_norm:
-            btn = await satir.query_selector("button:has-text('Üretim'), button:has-text('Üretimde'), .btn-success, .btn-info")
-            if btn:
-                hedef_btn = btn
-                break
+    op_norm = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+    for btn in tum_butonlar:
+        parent_text = await btn.evaluate("el => { let p = el.closest('div'); return p ? p.textContent : ''; }")
+        parent_norm = parent_text.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+        if op_norm in parent_norm:
+            hedef_btn = btn
+            break
 
     if not hedef_btn:
-        hedef_btn = await page.query_selector("button:has-text('Uretim'), button:has-text('Üretim'), button:has-text('Üretimde'), .btn-success, .btn-info")
+        log(f"'{operasyon}' icin buton bulunamadi, ilk btn-info deneniyor...", "uyari")
+        hedef_btn = await page.query_selector(".btn-info")
 
     if not hedef_btn:
         log(f"Uretim butonu bulunamadi: {is_no}", "uyari")
