@@ -58,30 +58,27 @@ def api_session_al(kullanici, sifre):
 
     login_data = {
         "_token": csrf_token,
-        "username": kullanici,
+        "email": kullanici,
         "password": sifre,
     }
 
     r2 = session.post("http://mars.egebt.com/login", data=login_data, allow_redirects=True)
     log(f"  Login POST: {r2.status_code}, URL: {r2.url}")
-    log(f"  Login redirect: {'login' not in r2.url}")
 
-    if "login" in r2.url:
-        # JSON ile dene
-        session.headers.update({
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-Requested-With": "XMLHttpRequest"
-        })
-        xsrf = session.cookies.get("XSRF-TOKEN", "")
-        if xsrf:
-            session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
-
-        r3 = session.post("http://mars.egebt.com/login", json={
+    # Başarılı mı kontrol et - login sayfasında değilsek başarılı
+    if "login" not in r2.url:
+        log("  Form login basarili!", "basari")
+    else:
+        # username ile de dene
+        login_data2 = {
+            "_token": csrf_token,
             "username": kullanici,
             "password": sifre,
-        })
-        log(f"  JSON Login: {r3.status_code}, {r3.text[:100]}")
+        }
+        r2 = session.post("http://mars.egebt.com/login", data=login_data2, allow_redirects=True)
+        log(f"  Username login: {r2.status_code}, URL: {r2.url}")
+        if "login" in r2.url:
+            log("  Login basarisiz! Kullanici adi/sifre yanlis olabilir.", "hata")
 
     # Son XSRF token'i header'a ekle
     xsrf = session.cookies.get("XSRF-TOKEN", "")
