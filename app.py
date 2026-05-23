@@ -3,8 +3,9 @@ from flask_cors import CORS
 import asyncio
 import threading
 import os
+import requests
+import json
 from datetime import datetime
-from playwright.async_api import async_playwright
 
 app = Flask(__name__)
 CORS(app)
@@ -23,252 +24,192 @@ def log(mesaj, tip="info"):
         durum["mesajlar"] = durum["mesajlar"][-100:]
     print(f"[{zaman}] {mesaj}")
 
-async def login(page, kullanici, sifre):
-    log("Giris yapiliyor...")
-    await page.goto("http://mars.egebt.com/login")
-    await page.wait_for_load_state("networkidle")
-    await page.fill('input[name="username"], input[type="text"]', kullanici)
-    await page.fill('input[name="password"], input[type="password"]', sifre)
-    await page.click('button:has-text("Giriş yap"), button:has-text("Giris yap"), button[type="submit"], input[type="submit"]')
-    await page.wait_for_load_state("networkidle")
-    if "login" in page.url:
-        raise Exception("Giris basarisiz!")
-    storage = await page.evaluate("""() => ({
-        ls: JSON.stringify(localStorage).substring(0,150),
-        ss: JSON.stringify(sessionStorage).substring(0,150),
-        ck: document.cookie.substring(0,150)
-    })""")
-    log(f"  ls: {storage['ls']}")
-    log(f"  ss: {storage['ss']}")
-    log(f"  ck: {storage['ck']}")
-    log("Giris basarili!", "basari")
+def api_session_al(kullanici, sifre):
+    """Login yap, session cookie döndür"""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Referer": "http://mars.egebt.com/",
+        "Origin": "http://mars.egebt.com"
+    })
 
-async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
-    log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
+    # Önce XSRF token al
+    r = session.get("http://mars.egebt.com/login")
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    if xsrf:
+        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
 
-    await page.goto(f"http://mars.egebt.com/uretim?I={is_no}", wait_until="networkidle", timeout=30000)
+    # Login
+    r = session.post("http://mars.egebt.com/api/login", json={
+        "username": kullanici,
+        "password": sifre
+    })
 
-    if "login" in page.url:
-        raise Exception("Oturum sona erdi!")
+    if r.status_code != 200:
+        # Alternatif login endpoint
+        r = session.post("http://mars.egebt.com/login", data={
+            "username": kullanici,
+            "password": sifre,
+            "_token": xsrf
+        })
 
-    log(f"  URL: {page.url}")
+    log(f"  Login status: {r.status_code}")
 
-    html_info = await page.evaluate("""() => ({
-        bodyLen: document.body.innerHTML.length,
-        appContent: document.querySelector('#app') ? document.querySelector('#app').innerHTML.substring(0, 300) : 'yok',
-        trCount: document.querySelectorAll('tbody tr').length
-    })""")
-    log(f"  body: {html_info['bodyLen']} | tr: {html_info['trCount']}")
-    log(f"  app: {html_info['appContent'][:200]}")
+    # XSRF token güncelle
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    if xsrf:
+        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
 
-    satir_sayisi = html_info['trCount']
-    if satir_sayisi == 0:
-        for i in range(20):
-            await page.wait_for_timeout(1000)
-            satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
-            if satir_sayisi > 0:
-                log(f"  {i+1}. saniyede {satir_sayisi} satir")
-                break
+    return session
 
-    if satir_sayisi == 0:
-        log("  Tablo yuklenemedi!", "hata")
+def uretim_bilgisi_al(session, isemri_no):
+    """getUretim API'si ile iş emri detaylarını al"""
+    # XSRF token güncelle
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    if xsrf:
+        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
+
+    r = session.post("http://mars.egebt.com/api/getUretim", json={
+        "isemri_no": isemri_no
+    })
+    log(f"  getUretim status: {r.status_code}")
+    if r.status_code == 200:
+        return r.json()
+    return None
+
+def operasyon_guncelle(session, payload):
+    """updateOperationStatus API'si ile işlemi kaydet"""
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    if xsrf:
+        session.headers["X-XSRF-TOKEN"] = requests.utils.unquote(xsrf)
+
+    r = session.post("http://mars.egebt.com/api/updateOperationStatus", json=payload)
+    log(f"  updateOperationStatus status: {r.status_code}")
+    try:
+        log(f"  Yanit: {r.text[:200]}")
+    except:
+        pass
+    return r.status_code == 200
+
+def is_emri_isle(session, isemri_no, miktar, recete_no, makine_no, operasyon):
+    log(f"Is emri: {isemri_no} | Op: {operasyon} | Makine: {makine_no}")
+
+    # İş emri bilgilerini al
+    data = uretim_bilgisi_al(session, isemri_no)
+    if not data:
+        log(f"  Is emri bilgisi alinamadi!", "hata")
         return False
 
-    # Operasyonu JS ile bul ve tikla
+    log(f"  Veri alindi: {json.dumps(data)[:300]}")
+
+    # Operasyonu bul
+    operasyonlar = data.get("operasyonlar", data.get("operations", data.get("data", [])))
+    if isinstance(data, list):
+        operasyonlar = data
+
+    hedef_op = None
     op_norm = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-    
-    buton_tiklandi = await page.evaluate(f"""
-        () => {{
-            const opAra = "{op_norm}";
-            const satirlar = document.querySelectorAll('tbody tr');
-            for (let satir of satirlar) {{
-                const tdler = satir.querySelectorAll('td');
-                if (tdler.length < 2) continue;
-                const opText = tdler[1].textContent.toLowerCase()
-                    .replace(/[ğ]/g,'g').replace(/[ü]/g,'u').replace(/[ş]/g,'s')
-                    .replace(/[ı]/g,'i').replace(/[ö]/g,'o').replace(/[ç]/g,'c');
-                if (opText.includes(opAra)) {{
-                    const btn = tdler[0].querySelector('button');
-                    if (btn && !btn.disabled) {{
-                        btn.click();
-                        return true;
-                    }}
-                }}
-            }}
-            return false;
-        }}
-    """)
 
-    if not buton_tiklandi:
-        log(f"  '{operasyon}' butonu bulunamadi veya disabled!", "uyari")
+    for op in operasyonlar:
+        op_adi = str(op.get("operasyon_adi", op.get("operation_name", op.get("name", "")))).lower()
+        op_adi_norm = op_adi.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+        if op_norm in op_adi_norm:
+            hedef_op = op
+            break
+
+    if not hedef_op and operasyonlar:
+        log(f"  '{operasyon}' bulunamadi, tum operasyonlar: {[str(op) for op in operasyonlar]}", "uyari")
         return False
 
-    log(f"  Buton tiklandi, modal bekleniyor...")
-    await page.wait_for_timeout(2000)
+    op_id = hedef_op.get("id") if hedef_op else data.get("id")
+    quality_entries = hedef_op.get("quality_entries", []) if hedef_op else data.get("quality_entries", [])
 
-    # Modal acildi mi JS ile kontrol et
-    modal_var = await page.evaluate("!!document.querySelector('.production-dialog__panel')")
-    if not modal_var:
-        log("  Modal acilmadi!", "uyari")
-        return False
+    # Quality entries'leri OK yap
+    for qe in quality_entries:
+        if qe.get("control_type") == "oknok":
+            qe["entered_value"] = "OK"
+            qe["result_status"] = "OK"
 
-    log("  Modal acildi, veriler giriliyor...")
+    makine_sayi = str(makine_no).split("-")[-1].strip() if makine_no else ""
 
-    # Onayli Miktar
-    await page.evaluate(f"""
-        () => {{
-            const input = document.querySelector('.production-dialog__metric--ok input');
-            if (input) {{
-                input.value = '';
-                input.dispatchEvent(new Event('input', {{bubbles: true}}));
-            }}
-        }}
-    """)
-    miktar_input = await page.query_selector(".production-dialog__metric--ok input")
-    if miktar_input:
-        await miktar_input.click()
-        await miktar_input.triple_click()
-        await miktar_input.type(str(miktar))
-        log(f"  Miktar girildi: {miktar}")
+    payload = {
+        "id": str(op_id),
+        "status": "2",
+        "quantity": str(miktar),
+        "rejected_quantity": "0",
+        "rejection_disposition": "",
+        "rejection_notes": "",
+        "machine_no": makine_sayi,
+        "recipe_no": str(recete_no) if recete_no else "",
+        "note1": "",
+        "note2": "",
+        "quality_entries": quality_entries
+    }
 
-    # Kalite kontrolleri - tum OK/NOK selectleri OK yap
-    await page.evaluate("""
-        () => {
-            document.querySelectorAll('.production-dialog__quality-item select').forEach(sel => {
-                sel.value = 'OK';
-                sel.dispatchEvent(new Event('change', {bubbles: true}));
-            });
-        }
-    """)
-
-    # Recete No
-    if recete_no:
-        try:
-            await page.evaluate(f"""
-                () => {{
-                    const sels = document.querySelectorAll('.production-dialog__form-grid select');
-                    if (sels[0]) {{
-                        sels[0].value = '{recete_no}';
-                        sels[0].dispatchEvent(new Event('change', {{bubbles: true}}));
-                    }}
-                }}
-            """)
-            log(f"  Recete girildi: {recete_no}")
-        except Exception as e:
-            log(f"  Recete hatasi: {e}", "uyari")
-
-    # Makine No - "Kumlama-1" -> "1"
-    if makine_no:
-        try:
-            makine_sayi = makine_no.split("-")[-1].strip()
-            await page.evaluate(f"""
-                () => {{
-                    const sels = document.querySelectorAll('.production-dialog__form-grid select');
-                    if (sels[1]) {{
-                        sels[1].value = '{makine_sayi}';
-                        sels[1].dispatchEvent(new Event('change', {{bubbles: true}}));
-                    }}
-                }}
-            """)
-            log(f"  Makine girildi: {makine_sayi}")
-        except Exception as e:
-            log(f"  Makine hatasi: {e}", "uyari")
-
-    await page.wait_for_timeout(500)
-
-    # Sonraki Islem butonu
-    sonraki_tiklandi = await page.evaluate("""
-        () => {
-            const footer = document.querySelector('.production-dialog__footer');
-            if (!footer) return false;
-            const btns = footer.querySelectorAll('button');
-            for (let btn of btns) {
-                if (btn.textContent.includes('Sonraki')) {
-                    btn.click();
-                    return true;
-                }
-            }
-            return false;
-        }
-    """)
-
-    if sonraki_tiklandi:
-        await page.wait_for_timeout(2000)
-        log(f"  Tamamlandi: {is_no} - {makine_no}", "basari")
-        return True
+    log(f"  Payload: {json.dumps(payload)[:300]}")
+    sonuc = operasyon_guncelle(session, payload)
+    if sonuc:
+        log(f"  Tamamlandi: {isemri_no} - Makine {makine_sayi}", "basari")
     else:
-        log("  Sonraki Islem butonu yok!", "uyari")
-        return False
+        log(f"  Islem basarisiz!", "hata")
+    return sonuc
 
-
-async def otomasyon_dongu(config):
+def otomasyon_dongu(config):
     durum["calisıyor"] = True
     durum["tur"] = 0
     log("Otomasyon basladi", "basari")
+
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-blink-features=AutomationControlled",
-                    "--window-size=1280,800"
-                ]
-            )
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                java_script_enabled=True,
-                ignore_https_errors=True
-            )
-            page = await context.new_page()
-            await login(page, config["kullanici"], config["sifre"])
+        session = api_session_al(config["kullanici"], config["sifre"])
+        log("Session olusturuldu", "basari")
 
-            while durum["calisıyor"]:
-                durum["tur"] += 1
-                log(f"Tur #{durum['tur']} basladi")
-                operasyon = config.get("operasyon", "Yag alma")
-                makineler = config.get("makineler", [""])
-                if not makineler:
-                    makineler = [""]
-                basarili = 0
-                toplam = 0
+        while durum["calisıyor"]:
+            durum["tur"] += 1
+            log(f"Tur #{durum['tur']} basladi")
 
-                for is_no in config["is_emirleri"]:
+            operasyon = config.get("operasyon", "Yag alma")
+            makineler = config.get("makineler", [""])
+            if not makineler:
+                makineler = [""]
+
+            basarili = 0
+            toplam = 0
+
+            for isemri_no in config["is_emirleri"]:
+                if not durum["calisıyor"]:
+                    break
+                for makine in makineler:
                     if not durum["calisıyor"]:
                         break
-                    for makine in makineler:
-                        if not durum["calisıyor"]:
-                            break
-                        toplam += 1
-                        try:
-                            if await is_emri_isle(page, is_no, config["miktar"], config.get("recete",""), makine, operasyon):
-                                basarili += 1
-                        except Exception as e:
-                            log(f"Hata ({is_no}/{makine}): {e}", "hata")
+                    toplam += 1
+                    try:
+                        if is_emri_isle(session, isemri_no, config["miktar"],
+                                        config.get("recete", ""), makine, operasyon):
+                            basarili += 1
+                    except Exception as e:
+                        log(f"Hata ({isemri_no}/{makine}): {e}", "hata")
 
-                durum["son_islem"] = datetime.now().strftime("%H:%M:%S")
-                log(f"Tur #{durum['tur']} bitti. {basarili}/{toplam} islendi. {config['tekrar_dk']} dk bekleniyor...")
+            durum["son_islem"] = datetime.now().strftime("%H:%M:%S")
+            log(f"Tur #{durum['tur']} bitti. {basarili}/{toplam} islendi. {config['tekrar_dk']} dk bekleniyor...")
 
-                for _ in range(config["tekrar_dk"] * 60):
-                    if not durum["calisıyor"]:
-                        break
-                    await asyncio.sleep(1)
+            for _ in range(config["tekrar_dk"] * 60):
+                if not durum["calisıyor"]:
+                    break
+                import time
+                time.sleep(1)
 
-            await browser.close()
     except Exception as e:
         log(f"Kritik hata: {e}", "hata")
+        import traceback
+        log(traceback.format_exc(), "hata")
     finally:
         durum["calisıyor"] = False
         log("Otomasyon durduruldu.")
 
 def thread_baslat(config):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(otomasyon_dongu(config))
-    loop.close()
+    otomasyon_dongu(config)
 
 @app.route('/')
 def index():
