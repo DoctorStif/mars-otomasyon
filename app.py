@@ -33,23 +33,37 @@ async def login(page, kullanici, sifre):
     await page.wait_for_load_state("networkidle")
     if "login" in page.url:
         raise Exception("Giris basarisiz!")
+    storage = await page.evaluate("""() => ({
+        ls: JSON.stringify(localStorage).substring(0,150),
+        ss: JSON.stringify(sessionStorage).substring(0,150),
+        ck: document.cookie.substring(0,150)
+    })""")
+    log(f"  ls: {storage['ls']}")
+    log(f"  ss: {storage['ss']}")
+    log(f"  ck: {storage['ck']}")
     log("Giris basarili!", "basari")
 
 async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
-    await page.goto(f"http://mars.egebt.com/uretim?I={is_no}", wait_until="domcontentloaded")
+    # SPA navigation - page.goto yerine window.location kullan
+    await page.evaluate(f"window.location.href = '/uretim?I={is_no}'")
+    await page.wait_for_load_state("domcontentloaded")
+    await page.wait_for_timeout(3000)
 
     if "login" in page.url:
-        raise Exception("Oturum sona erdi, yeniden baslatin.")
+        raise Exception("Oturum sona erdi!")
 
-    # Vue render icin bekle, JS ile satir sayisini kontrol et
-    satir_sayisi = 0
-    for i in range(30):
-        await page.wait_for_timeout(1000)
-        satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
-        if satir_sayisi > 0:
-            log(f"  {i+1}. saniyede {satir_sayisi} satir bulundu")
-            break
+    log(f"  URL: {page.url}")
+    satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
+    log(f"  Satir sayisi: {satir_sayisi}")
+
+    if satir_sayisi == 0:
+        for i in range(15):
+            await page.wait_for_timeout(1000)
+            satir_sayisi = await page.evaluate("document.querySelectorAll('tbody tr').length")
+            if satir_sayisi > 0:
+                log(f"  {i+1}. saniyede {satir_sayisi} satir bulundu")
+                break
 
     if satir_sayisi == 0:
         log("  Tablo yuklenemedi!", "hata")
