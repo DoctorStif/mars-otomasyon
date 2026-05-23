@@ -46,23 +46,24 @@ async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
         await page.wait_for_timeout(1500)
         await page.wait_for_load_state("networkidle")
 
-    # Tüm .btn-info butonlarını bul, parent div'inden operasyon adını kontrol et
-    tum_butonlar = await page.query_selector_all(".btn-info")
+    # Tablodaki her satırı gez: buton 1. td'de, operasyon adı 2. td'de
+    tum_satirlar = await page.query_selector_all("table tbody tr")
     hedef_btn = None
     op_norm = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-    for btn in tum_butonlar:
-        parent_text = await btn.evaluate("el => { let p = el.closest('div'); return p ? p.textContent : ''; }")
-        parent_norm = parent_text.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
-        if op_norm in parent_norm:
-            hedef_btn = btn
-            break
+    for satir in tum_satirlar:
+        op_td = await satir.query_selector("td:nth-child(2)")
+        if not op_td:
+            continue
+        op_text = (await op_td.inner_text()).lower()
+        op_text_norm = op_text.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+        if op_norm in op_text_norm:
+            btn = await satir.query_selector("td:first-child button")
+            if btn:
+                hedef_btn = btn
+                break
 
     if not hedef_btn:
-        log(f"'{operasyon}' icin buton bulunamadi, ilk btn-info deneniyor...", "uyari")
-        hedef_btn = await page.query_selector(".btn-info")
-
-    if not hedef_btn:
-        log(f"Uretim butonu bulunamadi: {is_no}", "uyari")
+        log(f"'{operasyon}' icin buton bulunamadi!", "uyari")
         return False
 
     await hedef_btn.click()
