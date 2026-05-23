@@ -29,7 +29,7 @@ async def login(page, kullanici, sifre):
     await page.wait_for_load_state("networkidle")
     await page.fill('input[name="username"], input[type="text"]', kullanici)
     await page.fill('input[name="password"], input[type="password"]', sifre)
-    await page.click('button[type="submit"], input[type="submit"]')
+    await page.click('button:has-text("Giriş yap"), button:has-text("Giris yap"), button[type="submit"], input[type="submit"]')
     await page.wait_for_load_state("networkidle")
     if "login" in page.url:
         raise Exception("Giris basarisiz!")
