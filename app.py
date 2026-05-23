@@ -38,28 +38,32 @@ async def login(page, kullanici, sifre):
 async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
     await page.goto(f"http://mars.egebt.com/uretim?I={is_no}")
-    await page.wait_for_load_state("networkidle")
+    # Vue.js sayfasinin tamamen yuklenmesini bekle
+    await page.wait_for_selector("table tbody tr", timeout=15000)
 
-    basla_btn = await page.query_selector("button:has-text('Basla'), .btn:has-text('Basla')")
+    basla_btn = await page.query_selector(".btn-primary:has-text('Basla'), .btn:has-text('Basla')")
     if basla_btn:
         await basla_btn.click()
         await page.wait_for_timeout(1500)
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_selector("table tbody tr", timeout=10000)
 
-    # Tablodaki her satırı gez: buton 1. td'de, operasyon adı 2. td'de
+    # Tablodaki her satiri gez: buton 1. td'de, operasyon adi 2. td'de
     tum_satirlar = await page.query_selector_all("table tbody tr")
     hedef_btn = None
     op_norm = operasyon.lower().replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+    log(f"  Toplam {len(tum_satirlar)} satir bulundu")
     for satir in tum_satirlar:
         op_td = await satir.query_selector("td:nth-child(2)")
         if not op_td:
             continue
         op_text = (await op_td.inner_text()).lower()
         op_text_norm = op_text.replace("ğ","g").replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c")
+        log(f"  Satir: {op_text.strip()}")
         if op_norm in op_text_norm:
             btn = await satir.query_selector("td:first-child button")
             if btn:
                 hedef_btn = btn
+                log(f"  Buton bulundu: {op_text.strip()}", "basari")
                 break
 
     if not hedef_btn:
@@ -67,42 +71,55 @@ async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
         return False
 
     await hedef_btn.click()
-    await page.wait_for_timeout(1500)
+    # production-dialog'un acilmasini bekle
+    await page.wait_for_selector(".production-dialog__panel", timeout=10000)
+    log("  Modal acildi")
 
-    modal = await page.query_selector(".modal, [role='dialog']")
-    if not modal:
-        log("Modal acilmadi!", "uyari")
-        return False
-
-    miktar_input = await page.query_selector(".modal input[type='number']:first-of-type, input[placeholder*='Onayli']")
+    # Onayli Miktar - production-dialog__metric--ok icindeki input
+    miktar_input = await page.query_selector(".production-dialog__metric--ok input")
     if miktar_input:
         await miktar_input.triple_click()
         await miktar_input.fill(str(miktar))
+        log(f"  Miktar girildi: {miktar}")
 
+    # Kalite kontrolleri: OK/NOK select'lerini OK yap
+    kalite_selectler = await page.query_selector_all(".production-dialog__quality-item select.form-select")
+    for sel in kalite_selectler:
+        try:
+            await sel.select_option(value="OK")
+        except:
+            pass
+
+    # Recete No - production-dialog__form-grid icindeki ilk select
     if recete_no:
         try:
-            sel = await page.query_selector(".modal select:nth-of-type(1)")
+            sel = await page.query_selector(".production-dialog__form-grid select:nth-of-type(1)")
             if sel:
-                await sel.select_option(label=recete_no)
-        except:
-            pass
+                await sel.select_option(value=recete_no)
+                log(f"  Recete secildi: {recete_no}")
+        except Exception as e:
+            log(f"  Recete secilemedi: {e}", "uyari")
 
+    # Makine No - production-dialog__form-grid icindeki ikinci select (deger 1-5)
     if makine_no:
         try:
-            sel = await page.query_selector(".modal select:nth-of-type(2)")
+            # makine_no "Kumlama-1" gibi geliyor, sayiyi al
+            makine_sayi = makine_no.split("-")[-1].strip()
+            sel = await page.query_selector(".production-dialog__form-grid select:nth-of-type(2)")
             if sel:
-                await sel.select_option(label=makine_no)
-        except:
-            pass
+                await sel.select_option(value=makine_sayi)
+                log(f"  Makine secildi: {makine_sayi}")
+        except Exception as e:
+            log(f"  Makine secilemedi: {e}", "uyari")
 
     await page.wait_for_timeout(500)
-    sonraki = await page.query_selector("button:has-text('Sonraki')")
+    sonraki = await page.query_selector(".production-dialog__footer .btn-primary")
     if sonraki:
         await sonraki.click()
         await page.wait_for_timeout(2000)
-        log(f"Tamamlandi: {is_no} - {makine_no}", "basari")
+        log(f"  Tamamlandi: {is_no} - {makine_no}", "basari")
         return True
-    log("Sonraki Islem butonu yok!", "uyari")
+    log("  Sonraki Islem butonu yok!", "uyari")
     return False
 
 async def otomasyon_dongu(config):
