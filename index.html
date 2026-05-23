@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mars Otomasyon</title>
+<style>
+:root {
+  --bg: #0a0e1a; --surface: #111827; --border: #1e2d40;
+  --accent: #0ea5e9; --accent2: #22d3ee; --success: #10b981;
+  --warn: #f59e0b; --danger: #ef4444; --text: #e2e8f0; --muted: #64748b;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: sans-serif; padding: 16px 14px 48px; }
+.header { text-align: center; margin-bottom: 24px; }
+.header h1 { font-size: 1.3rem; letter-spacing: 0.1em; color: var(--accent2); text-transform: uppercase; font-family: monospace; }
+.header p { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+.status-bar { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; margin-bottom: 16px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.dot.aktif { background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.status-text { font-family: monospace; font-size: 0.82rem; color: var(--text); }
+.status-text span { color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+.card-title { font-family: monospace; font-size: 0.68rem; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+label { display: block; font-size: 0.76rem; color: var(--muted); margin-bottom: 5px; font-family: monospace; }
+input, textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); padding: 10px 12px;
+  font-family: monospace; font-size: 0.88rem; margin-bottom: 13px;
+  outline: none; transition: border-color 0.2s;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+input[type="password"] { letter-spacing: 0.2em; }
+textarea { resize: vertical; min-height: 78px; }
+.hint { font-size: 0.7rem; color: var(--muted); margin-top: -10px; margin-bottom: 13px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* Operasyon tabları */
+.tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 4px; }
+.tab {
+  flex: 1; min-width: 100px; padding: 10px 6px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--muted);
+  font-family: monospace; font-size: 0.76rem;
+  cursor: pointer; text-align: center;
+  transition: all 0.18s; appearance: none; outline: none;
+}
+.tab.aktif {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  background: rgba(14,165,233,0.1) !important;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Kumlama makine grid */
+.makine-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.makine-btn {
+  padding: 14px 6px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--muted);
+  font-family: monospace; font-size: 0.8rem;
+  cursor: pointer; text-align: center; position: relative;
+  transition: all 0.18s; appearance: none; outline: none;
+}
+.makine-btn.secili {
+  border-color: var(--success) !important;
+  color: var(--success) !important;
+  background: rgba(16,185,129,0.1) !important;
+  box-shadow: 0 0 0 1px var(--success);
+}
+.makine-btn.secili::after { content: "✓"; position: absolute; top: 3px; right: 6px; font-size: 0.62rem; }
+.ozet { font-size: 0.73rem; color: var(--accent); font-family: monospace; margin-top: 4px; margin-bottom: 4px; min-height: 18px; }
+
+.hidden { display: none !important; }
+
+/* Ana butonlar */
+.btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-family: monospace; font-size: 0.88rem; font-weight: 700; letter-spacing: 0.06em; cursor: pointer; transition: all 0.2s; text-transform: uppercase; }
+.btn-start { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #000; margin-bottom: 10px; }
+.btn-start:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-stop { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+.btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-stop:not(:disabled):hover { background: var(--danger); color: #fff; }
+
+.log-box { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 11px; height: 210px; overflow-y: auto; font-family: monospace; font-size: 0.73rem; line-height: 1.7; }
+.li { color: var(--text); } .lb { color: var(--success); } .lu { color: var(--warn); } .lh { color: var(--danger); }
+.lt { color: var(--muted); margin-right: 7px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Mars Otomasyon</h1>
+  <p>Uretim · Otomatik Islem</p>
+</div>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <div class="status-text" id="statusText"><span>Bekleniyor</span></div>
+</div>
+
+<div class="card">
+  <div class="card-title">Giris Bilgileri</div>
+  <label>Kullanici Adi</label>
+  <input type="text" id="kullanici" placeholder="kullanici_adi">
+  <label>Sifre</label>
+  <input type="password" id="sifre" placeholder="••••••••">
+</div>
+
+<div class="card">
+  <div class="card-title">Operasyon Sec</div>
+  <div class="tabs">
+    <button class="tab aktif" id="opYag">Yag Alma</button>
+    <button class="tab" id="opKum">Kumlama</button>
+    <button class="tab" id="opKap1">Kaplama-1</button>
+    <button class="tab" id="opKap2">Kaplama-2</button>
+    <button class="tab" id="opDiger">Diger</button>
+  </div>
+  <div id="digerWrap" class="hidden" style="margin-top:10px;">
+    <label>Operasyon adini yaz</label>
+    <input type="text" id="opDigerInput" placeholder="ornek: Lak-1">
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Makine Sec</div>
+  <div id="kumlamaWrap" class="hidden">
+    <label>Kumlama makineleri (birden fazla secebilirsin)</label>
+    <div class="makine-grid">
+      <button class="makine-btn" id="km1">Kumlama 1</button>
+      <button class="makine-btn" id="km2">Kumlama 2</button>
+      <button class="makine-btn" id="km3">Kumlama 3</button>
+      <button class="makine-btn" id="km4">Kumlama 4</button>
+      <button class="makine-btn" id="km5">Kumlama 5</button>
+    </div>
+    <div class="ozet" id="kumOzet">Henuz secilmedi</div>
+  </div>
+  <div id="tekliWrap">
+    <label>Makine No (bos birakilabilir)</label>
+    <input type="text" id="makineInput" placeholder="Bos birakilabilir">
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Is Emirleri</div>
+  <label>Is Emri Numaralari</label>
+  <textarea id="emirler" placeholder="X20260000004117&#10;X20260000004118"></textarea>
+  <p class="hint">Her satira bir is emri numarasi yaz</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Uretim Parametreleri</div>
+  <div class="row">
+    <div>
+      <label>Onayli Miktar</label>
+      <input type="number" id="miktar" placeholder="200">
+    </div>
+    <div>
+      <label>Tekrar (dk)</label>
+      <input type="number" id="tekrar" value="15">
+    </div>
+  </div>
+  <label>Recete No (bos birakilabilir)</label>
+  <input type="text" id="recete" placeholder="Bos birakilabilir">
+</div>
+
+<div class="card">
+  <button class="btn btn-start" id="btnBaslat">BASLAT</button>
+  <button class="btn btn-stop" id="btnDurdur" disabled>DURDUR</button>
+</div>
+
+<div class="card">
+  <div class="card-title">Islem Gunlugu</div>
+  <div class="log-box" id="logBox"><span class="li">Henuz islem yapilmadi...</span></div>
+</div>
+
+<script>
+// Operasyon state
+var secilenOp = "Yag alma";
+var secilenMakineler = [];
+var polling = null;
+
+// Operasyon tabları
+var opTablar = [
+  { id: "opYag",  deger: "Yag alma" },
+  { id: "opKum",  deger: "Kumlama" },
+  { id: "opKap1", deger: "Kaplama-1" },
+  { id: "opKap2", deger: "Kaplama-2" },
+  { id: "opDiger",deger: "diger" }
+];
+
+opTablar.forEach(function(item) {
+  document.getElementById(item.id).addEventListener("click", function() {
+    // Tum tablari kapat
+    opTablar.forEach(function(t) {
+      document.getElementById(t.id).classList.remove("aktif");
+    });
+    // Bunu ac
+    this.classList.add("aktif");
+    secilenOp = item.deger;
+
+    // Diger input
+    if (item.deger === "diger") {
+      document.getElementById("digerWrap").classList.remove("hidden");
+    } else {
+      document.getElementById("digerWrap").classList.add("hidden");
+    }
+
+    // Kumlama makine secimi
+    if (item.deger === "Kumlama") {
+      document.getElementById("kumlamaWrap").classList.remove("hidden");
+      document.getElementById("tekliWrap").classList.add("hidden");
+    } else {
+      document.getElementById("kumlamaWrap").classList.add("hidden");
+      document.getElementById("tekliWrap").classList.remove("hidden");
+    }
+  });
+});
+
+document.getElementById("opDigerInput").addEventListener("input", function() {
+  secilenOp = this.value;
+});
+
+// Kumlama makine butonlari
+var kumlaMakineler = [
+  { id: "km1", deger: "Kumlama-1" },
+  { id: "km2", deger: "Kumlama-2" },
+  { id: "km3", deger: "Kumlama-3" },
+  { id: "km4", deger: "Kumlama-4" },
+  { id: "km5", deger: "Kumlama-5" }
+];
+
+kumlaMakineler.forEach(function(item) {
+  document.getElementById(item.id).addEventListener("click", function() {
+    var idx = secilenMakineler.indexOf(item.deger);
+    if (idx === -1) {
+      secilenMakineler.push(item.deger);
+      this.classList.add("secili");
+    } else {
+      secilenMakineler.splice(idx, 1);
+      this.classList.remove("secili");
+    }
+    var ozet = document.getElementById("kumOzet");
+    ozet.textContent = secilenMakineler.length === 0
+      ? "Henuz secilmedi"
+      : "Secili: " + secilenMakineler.join(", ");
+  });
+});
+
+// Baslat
+document.getElementById("btnBaslat").addEventListener("click", function() {
+  var kullanici = document.getElementById("kullanici").value.trim();
+  var sifre = document.getElementById("sifre").value.trim();
+  var emirlerRaw = document.getElementById("emirler").value.trim();
+  var miktar = document.getElementById("miktar").value.trim();
+  var tekrar = parseInt(document.getElementById("tekrar").value) || 15;
+  var recete = document.getElementById("recete").value.trim();
+  var operasyon = secilenOp === "diger"
+    ? document.getElementById("opDigerInput").value.trim()
+    : secilenOp;
+
+  if (!kullanici || !sifre) { alert("Kullanici adi ve sifre gerekli!"); return; }
+  if (!emirlerRaw) { alert("En az bir is emri gir!"); return; }
+  if (!miktar) { alert("Miktar gerekli!"); return; }
+  if (!operasyon) { alert("Operasyon sec!"); return; }
+
+  var makineler;
+  if (secilenOp === "Kumlama") {
+    if (secilenMakineler.length === 0) { alert("En az bir kumlama makinesi sec!"); return; }
+    makineler = secilenMakineler.slice();
+  } else {
+    var tek = document.getElementById("makineInput").value.trim();
+    makineler = [tek];
+  }
+
+  var emirler = emirlerRaw.split("\n").map(function(x){ return x.trim(); }).filter(Boolean);
+
+  fetch("/baslat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kullanici: kullanici, sifre: sifre,
+      is_emirleri: emirler, miktar: miktar,
+      tekrar_dk: tekrar, recete: recete,
+      operasyon: operasyon, makineler: makineler
+    })
+  }).then(function(r){ return r.json(); }).then(function(data) {
+    if (data.ok) {
+      document.getElementById("btnBaslat").disabled = true;
+      document.getElementById("btnDurdur").disabled = false;
+      document.getElementById("dot").className = "dot aktif";
+      baslaPoll();
+    } else {
+      alert("Hata: " + data.mesaj);
+    }
+  });
+});
+
+// Durdur
+document.getElementById("btnDurdur").addEventListener("click", function() {
+  fetch("/durdur", { method: "POST" }).then(function() {
+    document.getElementById("btnBaslat").disabled = false;
+    document.getElementById("btnDurdur").disabled = true;
+    document.getElementById("dot").className = "dot";
+    if (polling) clearInterval(polling);
+  });
+});
+
+function baslaPoll() {
+  if (polling) clearInterval(polling);
+  polling = setInterval(guncelle, 2000);
+}
+
+function guncelle() {
+  fetch("/durum").then(function(r){ return r.json(); }).then(function(data) {
+    var dot = document.getElementById("dot");
+    var st = document.getElementById("statusText");
+    if (data.calisıyor) {
+      dot.className = "dot aktif";
+      st.innerHTML = "Tur #" + data.tur + " Son: <span>" + (data.son_islem || "-") + "</span>";
+    } else {
+      dot.className = "dot";
+      st.innerHTML = "<span>Bekleniyor</span>";
+      document.getElementById("btnBaslat").disabled = false;
+      document.getElementById("btnDurdur").disabled = true;
+      if (polling) { clearInterval(polling); polling = null; }
+    }
+    var logBox = document.getElementById("logBox");
+    var atBottom = logBox.scrollHeight - logBox.clientHeight - logBox.scrollTop < 40;
+    if (data.mesajlar && data.mesajlar.length > 0) {
+      logBox.innerHTML = data.mesajlar.map(function(m) {
+        var cls = m.tip === "basari" ? "lb" : m.tip === "uyari" ? "lu" : m.tip === "hata" ? "lh" : "li";
+        return "<div class='" + cls + "'><span class='lt'>" + m.zaman + "</span>" + m.mesaj + "</div>";
+      }).join("");
+    }
+    if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+  });
+}
+</script>
+</body>
+</html>
