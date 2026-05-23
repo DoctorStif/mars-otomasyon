@@ -38,26 +38,22 @@ async def login(page, kullanici, sifre):
 async def is_emri_isle(page, is_no, miktar, recete_no, makine_no, operasyon):
     log(f"Is emri: {is_no} | Op: {operasyon} | Makine: {makine_no}")
     await page.goto(f"http://mars.egebt.com/uretim?I={is_no}", wait_until="domcontentloaded")
-    await page.wait_for_timeout(4000)
 
-    # Login sayfasina dustuyse tekrar giris yap
     if "login" in page.url:
-        log("Oturum sona ermis, tekrar giris yapiliyor...", "uyari")
         raise Exception("Oturum sona erdi, yeniden baslatin.")
 
-    # Mevcut URL ve sayfa icerigini logla
-    log(f"  Sayfa yuklendi: {page.url}")
-    html_snippet = await page.evaluate("document.querySelector('table') ? 'tablo VAR' : 'tablo YOK'")
-    log(f"  {html_snippet}")
-
-    tum_satirlar = await page.query_selector_all("table tbody tr")
-    log(f"  Satirlar: {len(tum_satirlar)}")
-
+    # Vue render icin polling bekle - max 30 saniye
+    tum_satirlar = []
+    for i in range(30):
+        await page.wait_for_timeout(1000)
+        tum_satirlar = await page.query_selector_all("tbody tr")
+        if len(tum_satirlar) > 0:
+            log(f"  Tablo {i+1}. saniyede yuklendi, {len(tum_satirlar)} satir")
+            break
+    
     if len(tum_satirlar) == 0:
-        # Daha fazla bekle
-        await page.wait_for_timeout(5000)
-        tum_satirlar = await page.query_selector_all("table tbody tr")
-        log(f"  Bekleme sonrasi satirlar: {len(tum_satirlar)}")
+        log("  Tablo yuklenemedi!", "hata")
+        return False
 
     basla_btn = await page.query_selector(".btn-primary:has-text('Basla'), .btn:has-text('Basla')")
     if basla_btn:
